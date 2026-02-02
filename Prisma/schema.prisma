@@ -1,15 +1,342 @@
+// This is your Prisma schema file for GoCart
+// Documentation: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// Example Model (Yahan aap apne table ka naam likhte hain)
+// User model (integrated with Clerk)
 model User {
-  id    Int     @id @default(autoincrement())
-  email String  @unique
-  name  String?
+  id            String    @id @default(cuid())
+  clerkId       String    @unique
+  email         String    @unique
+  firstName     String?
+  lastName      String?
+  imageUrl      String?
+  role          UserRole  @default(CUSTOMER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  vendor        Vendor?
+  orders        Order[]
+  cartItems     CartItem[]
+  reviews       Review[]
+  addresses     Address[]
+  
+  @@index([clerkId])
+  @@index([email])
+}
+
+enum UserRole {
+  CUSTOMER
+  VENDOR
+  ADMIN
+}
+
+// Vendor model
+model Vendor {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  businessName    String
+  description     String?
+  logo            String?
+  banner          String?
+  slug            String    @unique
+  
+  // Verification & Status
+  isVerified      Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  verifiedAt      DateTime?
+  
+  // Business Info
+  businessEmail   String?
+  businessPhone   String?
+  businessAddress String?
+  taxId           String?
+  
+  // Commission
+  commissionRate  Float     @default(15.0) // Platform commission percentage
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  products        Product[]
+  orders          Order[]
+  
+  @@index([userId])
+  @@index([slug])
+  @@index([isVerified])
+}
+
+// Category model
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  image       String?
+  parentId    String?
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryHierarchy")
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  products    Product[]
+  
+  @@index([slug])
+  @@index([parentId])
+}
+
+// Product model
+model Product {
+  id            String    @id @default(cuid())
+  vendorId      String
+  vendor        Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  
+  name          String
+  slug          String    @unique
+  description   String
+  
+  // Pricing
+  price         Float
+  comparePrice  Float?    // Original price for discount display
+  costPrice     Float?    // Vendor's cost (private)
+  
+  // Inventory
+  stock         Int       @default(0)
+  sku           String?   @unique
+  
+  // Media
+  images        String[]  // Array of image URLs
+  thumbnail     String?
+  
+  // Categorization
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags          String[]
+  
+  // Status
+  isActive      Boolean   @default(true)
+  isFeatured    Boolean   @default(false)
+  
+  // SEO
+  metaTitle     String?
+  metaDescription String?
+  
+  // Stats
+  viewCount     Int       @default(0)
+  salesCount    Int       @default(0)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  orderItems    OrderItem[]
+  cartItems     CartItem[]
+  reviews       Review[]
+  
+  @@index([vendorId])
+  @@index([categoryId])
+  @@index([slug])
+  @@index([isActive])
+  @@index([isFeatured])
+}
+
+// Cart model
+model CartItem {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  quantity    Int       @default(1)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+}
+
+// Order model
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+  
+  vendorId        String
+  vendor          Vendor      @relation(fields: [vendorId], references: [id])
+  
+  // Pricing
+  subtotal        Float
+  shippingCost    Float       @default(0)
+  tax             Float       @default(0)
+  discount        Float       @default(0)
+  total           Float
+  commission      Float       // Platform commission amount
+  vendorPayout    Float       // Amount vendor receives
+  
+  // Status
+  status          OrderStatus @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  
+  // Shipping
+  shippingAddressId String?
+  shippingAddress   Address?  @relation(fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  trackingNumber    String?
+  
+  // Payment
+  paymentMethod   String?
+  paymentIntentId String?     // For Stripe/payment gateway
+  
+  // Dates
+  paidAt          DateTime?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  cancelledAt     DateTime?
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  // Relations
+  items           OrderItem[]
+  
+  @@index([userId])
+  @@index([vendorId])
+  @@index([orderNumber])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// OrderItem model
+model OrderItem {
+  id          String    @id @default(cuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  
+  // Snapshot of product at time of order
+  productName String
+  productImage String?
+  
+  quantity    Int
+  price       Float     // Price at time of order
+  total       Float     // quantity * price
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([orderId])
+  @@index([productId])
+}
+
+// Address model
+model Address {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  fullName      String
+  phone         String
+  addressLine1  String
+  addressLine2  String?
+  city          String
+  state         String
+  postalCode    String
+  country       String    @default("India")
+  
+  isDefault     Boolean   @default(false)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  orders        Order[]
+  
+  @@index([userId])
+}
+
+// Review model
+model Review {
+  id          String    @id @default(cuid())
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  rating      Int       // 1-5
+  title       String?
+  comment     String?
+  images      String[]  // Review images
+  
+  isVerified  Boolean   @default(false) // Verified purchase
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([userId, productId]) // One review per user per product
+  @@index([productId])
+  @@index([userId])
+  @@index([rating])
+}
+
+// Analytics/Stats model (optional - for vendor dashboard)
+model VendorAnalytics {
+  id              String    @id @default(cuid())
+  vendorId        String    @unique
+  
+  totalSales      Float     @default(0)
+  totalOrders     Int       @default(0)
+  totalProducts   Int       @default(0)
+  totalRevenue    Float     @default(0)
+  
+  // Monthly stats
+  monthlyRevenue  Float     @default(0)
+  monthlyOrders   Int       @default(0)
+  
+  lastCalculated  DateTime  @default(now())
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([vendorId])
 }
